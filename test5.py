@@ -208,7 +208,7 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
         for attempt in range(15):
             contexts = driver.contexts
             webview = next((c for c in contexts if "WEBVIEW" in c), None)
-            if webview
+            if webview:
                 break
             time.sleep(2)
         if not webview:
