@@ -183,6 +183,7 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
     # ================= 彻底物理隔离的端口全家桶 =================
     options.set_capability("appium:wdaLocalPort", wda_port)
     options.set_capability("appium:webkitDebugProxyPort", webkit_port)
+    options.set_capability("appium:includeSafariInWebviews",True)
     
     # 额外隔离视频流截屏端口，防止多线程找元素时卡死
     mjpeg_port = 9100 + worker_id
@@ -202,8 +203,14 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
     
     try:
         time.sleep(3) 
-        contexts = driver.contexts
-        webview = next((c for c in contexts if "WEBVIEW" in c), None)
+        print("[*] 正在扫描网页上下文 最高等待 30秒...")
+        webview = None
+        for attempt in range(15):
+            contexts = driver.contexts
+            webview = next((c for c in contexts if "WEBVIEW" in c), None)
+            if webview
+                break
+            time.sleep(2)
         if not webview:
             print("[-] 未找到网页上下文！")
             return
@@ -424,6 +431,7 @@ def build_config_payload(raw_task_data, worker_id):
 #     print(f"[Worker-{worker_id}] [-] 等待模拟器启动超时！")
 #     return None
 
+
 def wait_and_get_booted_udid(target_device_name, timeout=40, worker_id=0):
     """
     智能等待专属模拟器彻底启动，精准匹配设备名称并动态获取 UDID。
@@ -441,6 +449,8 @@ def wait_and_get_booted_udid(target_device_name, timeout=40, worker_id=0):
                         real_udid = match.group(1)
                         print(f"[Worker-{worker_id}] [+] 专属模拟器已就绪！成功获取 UDID: {real_udid}")
                         return real_udid
+                else:
+                    time.sleep(2)
         except Exception:
             pass
         
@@ -471,122 +481,107 @@ def worker_loop(worker_id):
     # ==================================================================
 
     while True:
-        print(f"\n" + "="*50)
-        print(f"[Worker-{worker_id}] 🚀 开始执行第 {task_count} 轮任务")
-        print("="*50)
-
-        raw_task_data = fetch_task(worker_id)
-        if not raw_task_data:
-            time.sleep(5)
-            continue
-
-        config_payload = build_config_payload(raw_task_data, worker_id)
-        if config_payload is None:
-            print(f"[Worker-{worker_id}] [-] 解析任务数据失败或格式异常，跳过本次任务...")
-            time.sleep(3) 
-            continue 
-
-        random_folder_name = f"task_w{worker_id}_{uuid.uuid4().hex[:8]}"
-        current_task_dir = os.path.join(BASE_TEMP_CONFIG_DIR, random_folder_name)
-        os.makedirs(current_task_dir, exist_ok=True)
-
-        config_file_path = os.path.join(current_task_dir, "config.json")
-        try:
-            with open(config_file_path, 'w', encoding='utf-8') as f:
-                json.dump(config_payload, f, ensure_ascii=False, indent=4)
-        except Exception as e:
-            print(f"[Worker-{worker_id}] [-] 写入配置失败: {e}")
-            shutil.rmtree(current_task_dir, ignore_errors=True)
-            continue
-
-        env = os.environ.copy()
-        
-        # 将线程专属的固定机型注入环境变量
-        env["ALIDOA_VERSION"] = alidoa_version
-        env["SIMCTL_CHILD_ALIDOA_CONFIG_PATH"] = current_task_dir
-        env["ALIDOA_IOS_VERSION"] = "16.4"
-        
-        print(f"[Worker-{worker_id}] [3] 注入机型环境变量: {alidoa_version} 并启动 Minibrowser...")
-        
-        minibrowser_path = os.path.join(PROJECT_ROOT_DIR, "Tools", "Scripts", "run-minibrowser")
-        cmd = [minibrowser_path, "--release", "--ios-simulator", TARGET_URL]
-        
         process = None
         real_udid = None
-        
         try:
-            # ================== 核心新增：启动前强制销毁旧的专属模拟器 ==================
-            # 拼装你的模拟器专属名称，例如: "iPhone 1 For WebKit Development"
-            target_device_name = f"{alidoa_version} For WebKit Development"
-            print(f"[Worker-{worker_id}] 🧹 正在彻底销毁旧的模拟器容器: {target_device_name}...")
-            # 调用底层命令强制删除它。加上 2>/dev/null 是为了防止第一次运行(机器还不存在时)报错
-            os.system(f'xcrun simctl delete "{target_device_name}" 2>/dev/null')
-            
-            # 给苹果底层服务 2 秒钟的时间去清理磁盘和句柄
-            time.sleep(2) 
-
-            # ================= 核心新增：启动专属 Appium =================
-            print(f"[Worker-{worker_id}] 🚀 启动专属 Appium Server (端口: {appium_port})...")
-            import signal # 确保有 import signal
-            appium_process = subprocess.Popen(
-                ["appium", "-p", str(appium_port)],
-                stdout=subprocess.DEVNULL, # 不打印 Appium 日志，保持控制台清爽
-                stderr=subprocess.DEVNULL,
-                preexec_fn=os.setsid
-            )
-            # ==========================================================
-
-            process = subprocess.Popen(cmd, env=env, cwd=PROJECT_ROOT_DIR)
-            time.sleep(35)
-
-            real_udid = wait_and_get_booted_udid(target_device_name,timeout=40, worker_id=worker_id)
-
-            if not real_udid:
-                print(f"[Worker-{worker_id}] [-] 无法获取模拟器 UDID，放弃当前任务")
+            print(f"\n" + "="*50)
+            print(f"[Worker-{worker_id}] 🚀 开始执行第 {task_count} 轮任务")
+            print("="*50)
+            raw_task_data = fetch_task(worker_id)
+            if not raw_task_data:
+                time.sleep(5)
+                continue
+            config_payload = build_config_payload(raw_task_data, worker_id)
+            if config_payload is None:
+                print(f"[Worker-{worker_id}] [-] 解析任务数据失败或格式异常，跳过本次任务...")
+                time.sleep(3) 
                 continue 
+
+            random_folder_name = f"task_w{worker_id}_{uuid.uuid4().hex[:8]}"
+            current_task_dir = os.path.join(BASE_TEMP_CONFIG_DIR, random_folder_name)
+            os.makedirs(current_task_dir, exist_ok=True)
+
+            config_file_path = os.path.join(current_task_dir, "config.json")
+            try:
+                with open(config_file_path, 'w', encoding='utf-8') as f:
+                    json.dump(config_payload, f, ensure_ascii=False, indent=4)
+            except Exception as e:
+                print(f"[Worker-{worker_id}] [-] 写入配置失败: {e}")
+                shutil.rmtree(current_task_dir, ignore_errors=True)
+                continue
+
+            env = os.environ.copy()
+            
+            # 将线程专属的固定机型注入环境变量
+            env["ALIDOA_VERSION"] = alidoa_version
+            env["SIMCTL_CHILD_ALIDOA_CONFIG_PATH"] = current_task_dir
+            env["ALIDOA_IOS_VERSION"] = "16.4"
+            
+            print(f"[Worker-{worker_id}] [3] 注入机型环境变量: {alidoa_version} 并启动 Minibrowser...")
+            
+            minibrowser_path = os.path.join(PROJECT_ROOT_DIR, "Tools", "Scripts", "run-minibrowser")
+            cmd = [minibrowser_path, "--release", "--ios-simulator", TARGET_URL]
+            
+            try:
+                # ================== 核心新增：启动前强制销毁旧的专属模拟器 ==================
+                # 拼装你的模拟器专属名称，例如: "iPhone 1 For WebKit Development"
+                target_device_name = f"{alidoa_version} For WebKit Development"
+                #print(f"[Worker-{worker_id}] 🧹 正在彻底销毁旧的模拟器容器: {target_device_name}...")
+                # 调用底层命令强制删除它。加上 2>/dev/null 是为了防止第一次运行(机器还不存在时)报错
+                #os.system(f'xcrun simctl delete "{target_device_name}" 2>/dev/null')
                 
-            time.sleep(3)
-            
-            #execute_web_automation(real_udid,worker_id,wda_port)
-            execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_port)
-            
+                # 给苹果底层服务 2 秒钟的时间去清理磁盘和句柄
+                time.sleep(5) 
+                # ================= 核心新增：启动专属 Appium =================
+                print(f"[Worker-{worker_id}] 🚀 启动专属 Appium Server (端口: {appium_port})...")
+                import signal # 确保有 import signal
+                appium_process = subprocess.Popen(
+                    ["appium", "-p", str(appium_port)],
+                    stdout=subprocess.DEVNULL, # 不打印 Appium 日志，保持控制台清爽
+                    stderr=subprocess.DEVNULL,
+                    preexec_fn=os.setsid
+                )
+                # ==========================================================
+
+                process = subprocess.Popen(cmd, env=env, cwd=PROJECT_ROOT_DIR)
+                time.sleep(35)
+
+                real_udid = wait_and_get_booted_udid(target_device_name,timeout=40, worker_id=worker_id)
+
+                if not real_udid:
+                    print(f"[Worker-{worker_id}] [-] 无法获取模拟器 UDID，放弃当前任务")
+                    continue 
+                    
+                time.sleep(3)
+                
+                #execute_web_automation(real_udid,worker_id,wda_port)
+                execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_port)
+                
+            except Exception as e:
+                print(f"[Worker-{worker_id}] [-] 任务执行异常: {e}")
+
+            task_count += 1
+            print(f"[Worker-{worker_id}] [+] 本轮任务清理完毕，15 秒后进入下一轮...")
+            time.sleep(15)
         except Exception as e:
-            print(f"[Worker-{worker_id}] [-] 任务执行异常: {e}")
-            
+            print(f"[Worker-{worker_id}] [-] 任务执行异常2: {e}")
         finally:
             print(f"[Worker-{worker_id}] [5] 测试结束，执行无痕清理工作...")
-            
             if process:
                 try:
                     process.terminate()
                     process.wait(timeout=5)
                 except Exception:
                     process.kill()
-            
-            if 'real_udid' in locals() and real_udid:
-                print(f"[Worker-{worker_id}] [*] 正在向 iOS 模拟器发送硬关机指令 (UDID: {real_udid})...")
-                try:
-                    subprocess.run(["xcrun", "simctl", "shutdown", real_udid], check=True, timeout=10)
-                    print(f"[Worker-{worker_id}] [+] 模拟器已成功关机！")
-                except subprocess.TimeoutExpired:
-                    print(f"[Worker-{worker_id}] [-] 模拟器关机超时！尝试暴力杀死进程...")
-                    os.system(f"xcrun simctl shutdown {real_udid} 2>/dev/null") 
-                    #os.system("killall Simulator 2>/dev/null") 
-                except Exception as e:
-                    print(f"[Worker-{worker_id}] [-] 模拟器关机失败: {e}")
-                
-                # 清理 UDID 锁
-                with UDID_LOCK:
-                    if real_udid in CLAIMED_UDIDS:
-                        CLAIMED_UDIDS.remove(real_udid)
-            else:
-                print(f"[Worker-{worker_id}] [-] 未获取到 UDID，执行保底清理...")
-                #os.system("killall Simulator 2>/dev/null")
+            print(f"[Worker-{worker_id}] [*] 正在向 iOS 模拟器发送硬关机指令 (UDID: {real_udid})...")
+            try:
+                subprocess.run(["xcrun", "simctl", "shutdown", real_udid], check=True, timeout=10)
+                print(f"[Worker-{worker_id}] [+] 模拟器已成功关机！")
+            except subprocess.TimeoutExpired:
+                print(f"[Worker-{worker_id}] [-] 模拟器关机超时！尝试暴力杀死进程...")
                 os.system(f"xcrun simctl shutdown {real_udid} 2>/dev/null") 
-
-
-            print(f"[Worker-{worker_id}] [*] 正在删除隔离目录及指纹缓存: {current_task_dir}")
-            shutil.rmtree(current_task_dir, ignore_errors=True)
+            except Exception as e:
+                print(f"[Worker-{worker_id}] [-] 模拟器关机失败: {e}")
 
             # ================= 核心新增：关闭专属 Appium =================
             if appium_process:
@@ -595,12 +590,12 @@ def worker_loop(worker_id):
                 except Exception:
                     pass
             # ==========================================================
-            
+
+            print(f"[Worker-{worker_id}] [*] 正在删除隔离目录及指纹缓存: {current_task_dir}")
+            shutil.rmtree(current_task_dir, ignore_errors=True)
+
+           
             time.sleep(6)
-            
-        task_count += 1
-        print(f"[Worker-{worker_id}] [+] 本轮任务清理完毕，15 秒后进入下一轮...")
-        time.sleep(15)
 
 if __name__ == "__main__":
     os.makedirs(BASE_TEMP_CONFIG_DIR, exist_ok=True)
