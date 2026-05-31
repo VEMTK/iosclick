@@ -459,6 +459,18 @@ def wait_and_get_booted_udid(target_device_name, timeout=40, worker_id=0):
     print(f"[Worker-{worker_id}] [-] 等待专属模拟器 [{target_device_name}] 启动超时！")
     return None
 
+def kill_port_process(port):
+    try:
+        # 查找占用该端口的进程 ID (PID)
+        cmd = f"lsof -t -i:{port}"
+        pid = subprocess.check_output(cmd, shell=True).decode().strip()
+        if pid:
+            # 强行杀死残留进程
+            os.system(f"kill -9 {pid}")
+            print(f"[Worker] 成功清理残留端口: {port}")
+    except subprocess.CalledProcessError:
+        # 如果端口没被占用，会抛出异常，直接忽略即可
+        pass
 
 # ----------------- 线程守护引擎 -----------------
 def worker_loop(worker_id):
@@ -477,6 +489,13 @@ def worker_loop(worker_id):
     webkit_port = 27700 + worker_id    # 专属的网页调试端口
     # ==========================================================
 
+    kill_port_process(wda_port)
+    time.sleep(3)
+    kill_port_process(webkit_port)
+    time.sleep(3)
+    kill_port_process(appium_port)
+    time.sleep(3)
+    
 
     # ==================================================================
 
