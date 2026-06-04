@@ -277,6 +277,8 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
         driver.switch_to.context(webview)
         print("[+] 成功进入网页环境")
 
+        driver.get("https://m.facebook.com")
+
         wait = WebDriverWait(driver, 15)
 
         print("[*] 寻找并点击 clickme 标签...")
@@ -514,7 +516,8 @@ def worker_loop(worker_id):
     # ==========================================================
 
     # 生成目录
-    random_folder_name = f"task_w{worker_id}_{uuid.uuid4().hex[:8]}"
+    #random_folder_name = f"task_w{worker_id}_{uuid.uuid4().hex[:8]}"
+    random_folder_name = f"iPhone {worker_id + 1}"
     # appium_process进程
     appium_process = None
     while True:
@@ -543,7 +546,6 @@ def worker_loop(worker_id):
                 print(f"[Worker-{worker_id}] [-] 解析任务数据失败或格式异常，跳过本次任务...")
                 time.sleep(3) 
                 continue 
-
             
             current_task_dir = os.path.join(BASE_TEMP_CONFIG_DIR, random_folder_name)
             os.makedirs(current_task_dir, exist_ok=True)
