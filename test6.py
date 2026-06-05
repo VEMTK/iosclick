@@ -594,7 +594,7 @@ def worker_loop(worker_id):
                     time.sleep(5) 
                 # ==========================================================
 
-                process = subprocess.Popen(cmd, env=env, cwd=PROJECT_ROOT_DIR)
+                #process = subprocess.Popen(cmd, env=env, cwd=PROJECT_ROOT_DIR)
                 time.sleep(35)
                 
                 # 查询 udid
@@ -629,8 +629,9 @@ def worker_loop(worker_id):
             # test6 测试采用不关机的策略 只关 app
             print(f"[Worker-{worker_id}] [5] 测试结束，执行无痕清理工作...")
             print(f"[Worker-{worker_id}] 🔪 正在模拟器内强制终结 Minibrowser 进程...")
-            os.system(f"xcrun simctl terminate {real_udid} {MINIBROWSER_BUNDLE_ID} 2>/dev/null")
 
+            subprocess.run(["xcrun", "simctl", "terminate", real_udid,MINIBROWSER_BUNDLE_ID], check=True, timeout=10)
+            #os.system(f"xcrun simctl terminate {real_udid} {MINIBROWSER_BUNDLE_ID} 2>/dev/null")
             # if process:
             #     try:
             #         process.terminate()
