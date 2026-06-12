@@ -9,6 +9,7 @@ import requests
 import subprocess
 import re 
 import threading
+import string
 
 from appium import webdriver
 from appium.options.ios import XCUITestOptions
@@ -24,10 +25,10 @@ from selenium.webdriver.common.action_chains import ActionChains
 # ================= 核心配置区域 =================
 API_URL = "https://www.autoios.click/api/offer-click-task/next-waiting-task?offerId=1&proxyCountryCode=US"
 TARGET_URL = "https://m.facebook.com" # 初始网址
-H5_GAME_URL = "https://sec.myrathis.com"
+H5_GAME_URL = "https://play.myrathis.com"
 USER_HOME = os.path.expanduser("~")
 CONFIG_DIR = os.path.join(USER_HOME, "Documents", "iPhone14")
-BASE_TEMP_CONFIG_DIR = os.path.join(USER_HOME, "Documents", "TempConfigs")
+BASE_TEMP_CONFIG_DIR = os.path.join(USER_HOME, "Documents")
 CONFIG_FILE_PATH = os.path.join(CONFIG_DIR, "config.json")
 PROJECT_ROOT_DIR = "/Users/robin/src/WebKit"
 
@@ -35,7 +36,7 @@ PROJECT_ROOT_DIR = "/Users/robin/src/WebKit"
 MINIBROWSER_BUNDLE_ID = "org.gu.MobileMiniBrowser" 
 
 # ================= 并发集群控制区域 =================
-CONCURRENT_COUNT = 4             # [核心] 设置同时运行的虚拟机数量！(对应 iPhone 1 到 10)
+CONCURRENT_COUNT = 6               # [核心] 设置同时运行的虚拟机数量！(对应 iPhone 1 到 10)
 CLAIMED_UDIDS = set()              # 记录已经被分配出去的 UDID
 UDID_LOCK = threading.Lock()       # 互斥锁，防止两个线程抢同一台刚开机的模拟器
 # =================================================
@@ -159,7 +160,9 @@ def human_tap_element_area(driver, web_element, debug_mode=True):
 def find_and_tap_lazy_element(driver, elements_list, max_swipes=5):
     if not elements_list:
         return False
+    #weights = [0.9] + [0.1 / (len(elements_list) - 1)] * (len(elements_list) - 1)
     target_element = random.choice(elements_list)
+    #target_element = random.choices(elements_list, weights=weights)[0]
     print(f"[*] 锁定了一个隐藏目标，准备执行真人拉网式搜索...")
     
     driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", target_element)
@@ -215,6 +218,121 @@ def safe_execute_js(driver, js_code, element=None):
     except Exception as e:
         print(f"[!] 异步执行 JS 时遭遇底层断联，已强制放行: {e}")
 
+
+def generate_fake_us_user():
+    """生成绝对逼真的美国本土虚假用户信息"""
+    first_names = ["James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Thomas", "Charles", "Mary", "Patricia", "Jennifer", "Linda", "Elizabeth", "Barbara", "Susan", "Jessica", "Sarah", "Karen"]
+    last_names = ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Hernandez", "Lopez"]
+    cities = ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix", "Philadelphia", "San Antonio", "San Diego", "Dallas", "San Jose"]
+    states = ["NY", "CA", "IL", "TX", "AZ", "PA", "TX", "CA", "TX", "CA"]
+    
+    fn = random.choice(first_names)
+    ln = random.choice(last_names)
+    # 模拟真实用户的邮箱习惯带数字
+    domain = random.choice(["gmail.com", "yahoo.com", "outlook.com", "hotmail.com"])
+    email = f"{fn.lower()}.{ln.lower()}{random.randint(100, 9999)}@{domain}"
+    
+    # 随机生成美国10位手机号 (避开555等假号码区段)
+    phone = f"{random.randint(201, 989)}{random.randint(200, 999)}{random.randint(1000, 9999)}"
+    
+    address = f"{random.randint(100, 9999)} {random.choice(['Main', 'Oak', 'Pine', 'Maple', 'Cedar'])} {random.choice(['St', 'Ave', 'Blvd', 'Rd'])}"
+    zip_code = f"{random.randint(10000, 99999)}"
+    
+    return {
+        "firstname": fn,
+        "lastname": ln,
+        "fullname": f"{fn} {ln}",
+        "email": email,
+        "phone": phone,
+        "address": address,
+        "city": random.choice(cities),
+        "state": random.choice(states),
+        "zip": zip_code,
+        "password": "".join(random.choices(string.ascii_letters + string.digits, k=8)) + "A1!" # 强密码
+    }
+
+def auto_fill_form(driver, worker_id):
+    """启发式智能表单识别与填写"""
+    print(f"[Worker-{worker_id}] [*] 启动 AI 启发式表单扫描...")
+    
+    # 找所有的输入框
+    inputs = driver.find_elements(By.TAG_NAME, "input")
+    if not inputs:
+        print(f"[Worker-{worker_id}] [-] 当前页面未发现标准表单 input，跳过转化步骤。")
+        return False
+        
+    user_info = generate_fake_us_user()
+    print(f"[Worker-{worker_id}] [+] 生成转化肉鸡信息: {user_info['fullname']} | {user_info['email']}")
+    
+    filled_count = 0
+    for inp in inputs:
+        try:
+            # 过滤不可见和特殊类型的 input
+            if not inp.is_displayed():
+                continue
+            type_attr = (inp.get_attribute("type") or "").lower()
+            if type_attr in ["hidden", "submit", "button", "checkbox", "radio", "image", "file"]:
+                continue
+                
+            # 提取线索：根据 name, id, placeholder 的英文单词猜测它的含义
+            name_attr = (inp.get_attribute("name") or "").lower()
+            id_attr = (inp.get_attribute("id") or "").lower()
+            ph_attr = (inp.get_attribute("placeholder") or "").lower()
+            
+            clues = f"{name_attr} {id_attr} {ph_attr}"
+            
+            val_to_fill = None
+            if "email" in clues or type_attr == "email":
+                val_to_fill = user_info["email"]
+            elif "first" in clues and "name" in clues:
+                val_to_fill = user_info["firstname"]
+            elif "last" in clues and "name" in clues:
+                val_to_fill = user_info["lastname"]
+            elif "name" in clues or "user" in clues:
+                val_to_fill = user_info["fullname"]
+            elif "phone" in clues or "mobile" in clues or "tel" in clues or type_attr == "tel":
+                val_to_fill = user_info["phone"]
+            elif "zip" in clues or "postal" in clues:
+                val_to_fill = user_info["zip"]
+            elif "address" in clues:
+                val_to_fill = user_info["address"]
+            elif "city" in clues:
+                val_to_fill = user_info["city"]
+            elif "state" in clues or "province" in clues:
+                val_to_fill = user_info["state"]
+            elif "pass" in clues or type_attr == "password":
+                val_to_fill = user_info["password"]
+                
+            if val_to_fill:
+                # 滚动到这个输入框
+                driver.execute_script("arguments[0].scrollIntoView({behavior: 'instant', block: 'center'});", inp)
+                time.sleep(0.5)
+                
+                # 【终极防卡死必杀技】：用 JS 强行赋值并派发原生 Event 事件。
+                # 这能完美绕过 iOS 软键盘弹出导致的 Appium 坐标错乱，且能触发前端框架的 onChange 侦听器！
+                js_fill = """
+                    var el = arguments[0];
+                    el.value = arguments[1];
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                """
+                driver.execute_script(js_fill, inp, val_to_fill)
+                print(f"[Worker-{worker_id}]     ✅ 智能填充 [{clues[:15]}...] -> {val_to_fill}")
+                filled_count += 1
+                time.sleep(random.uniform(0.5, 1.5)) # 模拟真人打字时间停顿
+                
+        except Exception as e:
+            pass # 某个框报错不影响全局
+            
+    if filled_count > 0:
+        print(f"[Worker-{worker_id}] [+] 表单填写完毕！(共完成 {filled_count} 个字段)")
+        # 可选：如果你想自动点击“提交”按钮，可以把这行取消注释
+        # try: driver.find_element(By.CSS_SELECTOR, "button[type='submit'], input[type='submit']").click() except: pass
+        return True
+    else:
+        print(f"[Worker-{worker_id}] [-] 未找到语义匹配的输入框。")
+        return False
+
 # ----------------- 核心业务逻辑 -----------------
 def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_port):
     """执行复杂的网页自动化流程"""
@@ -255,6 +373,13 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
     options.set_capability("appium:wdaStartupRetryInterval", 10000)
     # ==========================================================
 
+    options.set_capability("appium:processArguments", {
+        "args": [],
+        "env": {
+            "DYLD_FRAMEWORK_PATH": "/Users/z16/src/WebKit/WebKitBuild/Release-iphonesimulator"
+        }
+    })
+
     print("[4] 正在附加 Appium 接管浏览器...")
     #driver = webdriver.Remote('http://127.0.0.1:4723', options=options)
     driver = webdriver.Remote(f'http://127.0.0.1:{appium_port}', options=options)
@@ -290,7 +415,7 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
         time.sleep(random.uniform(35, 61))
 
         wait = WebDriverWait(driver, 15) 
-        wait.until(EC.url_contains("sec.myrathis.com"))
+        wait.until(EC.url_contains("play.myrathis.com"))
         print("[+] 网页 URL 验证通过！")
         
         print("[*] 开始执行纯原生硬件“呼吸式”滑动浏览...")
@@ -306,7 +431,7 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
         print("[+] 页面阅读完毕！")
 
         if random.random() < 0.20:
-            print("[*] 🎲 触发 15% 概率，准备盲点广告区域...")
+            print("[*] 🎲 触发 20% 概率，准备盲点广告区域...")
             try:
                 ad_frames = driver.find_elements(By.CSS_SELECTOR, "iframe[id*='ads_iframe']")
                 if not ad_frames:
@@ -324,6 +449,50 @@ def execute_web_automation(real_udid, worker_id, wda_port, appium_port, webkit_p
                             native_safe_bezier_swipe(driver, duration_ms=random.randint(300, 1200))
                             print("    - 完成一次原生硬件屏幕滑动")
                         print("[+] 页面阅读完毕！")
+
+
+                        #随机点击
+                        # ================= 1. 随机点击可见的站内链接 =================
+                        print(f"[Worker-{worker_id}] [*] 寻找并随机点击页面上的任意可见链接...")
+                        try:
+                            # 找出所有 <a> 标签
+                            links = driver.find_elements(By.TAG_NAME, "a")
+                            valid_links = []
+                            for link in links:
+                                try:
+                                    # 必须可见且有一定的面积大小
+                                    if link.is_displayed() and link.rect['width'] > 5 and link.rect['height'] > 5:
+                                        # 过滤掉锚点链接 (#) 和 无效链接
+                                        href = link.get_attribute("href")
+                                        if href and not href.startswith("javascript") and not href.endswith("#"):
+                                            valid_links.append(link)
+                                except Exception:
+                                    pass
+                                    
+                            if valid_links:
+                                target_link = random.choice(valid_links)
+                                print(f"[Worker-{worker_id}] [+] 发现 {len(valid_links)} 个有效链接，准备随机暴击！")
+                                # 同样使用物理硬件级点击，绝对防风控
+                                human_tap_element_area(driver, target_link, worker_id, debug_mode=False)
+                                
+                                # 点击后，给新页面（或新标签页）缓冲加载时间
+                                time.sleep(random.uniform(10, 15))
+                            else:
+                                print(f"[Worker-{worker_id}] [-] 落地页内没有找到可供点击的有效链接。")
+                        except Exception as e:
+                            print(f"[Worker-{worker_id}] [-] 点击落地页链接时报错: {e}")
+
+
+                        # ================= 2. 识别表单并填入美国人资料 =================
+                        # 如果上面的链接跳转了，这里会自动在跳完的新页面里找表单
+                        # 调用刚刚写好的表单填写神器
+                        try:
+                            auto_fill_form(driver, worker_id)
+                            # 填完表单后，假装停留一会儿看看
+                            time.sleep(random.uniform(5, 10))
+                        except Exception as e:
+                            print(f"[Worker-{worker_id}] [-] 填充表单时发生异常: {e}")
+
                     else:
                         print("[-] 广告点击任务被安全放弃。")
                         
@@ -486,9 +655,17 @@ def is_appium_running(port):
 
 #设计一个map   worker_id -> udid 
 WORKER_UDID_MAP = {
-    0: "E1A8B2C3-4D5E-6F7A-8B9C-0D1E2F3A4B5C",  # Worker-0 绑定的模拟器
-    1: "A9B8C7D6-E5F4-4321-B987-A6F5E4D3C2B1",  # Worker-1 绑定的模拟器
-    2: "7F6E5D4C-3B2A-1098-7654-3210FEDCBA98",  # Worker-2 绑定的模拟器
+    0: "D9B9E375-A4CB-4A88-AF8A-21E5318284ED",  # Worker-0 绑定的模拟器
+    1: "AB2D0058-2CC5-45BA-BA2B-5FF42C22E86C",  # Worker-1 绑定的模拟器
+    2: "31FB00AE-AB66-4DEF-9A72-BD982BFEC54E",  # Worker-2 绑定的模拟器
+    3: "EC008957-AC59-4729-B45F-E4615657E0DE",
+    4: "13D6FD84-F586-4256-81C1-1F022D9C4E3B",
+    5: "98EEDBB2-AE1A-4BC7-A814-A9C88AFC0135",
+    6: "6EA68C95-7A99-433E-84BD-67347E36A42F",
+    7: "25DE4F2D-1D4F-4E81-BC2D-5BD00D05D610",
+    8: "B884455E-488E-404A-AD40-A2785CB7ABD3",
+    9: "A8F1173F-D9AA-4F59-9061-1E446AE27FA9",
+    
 }    
 
 def get_real_udid_from_work_id(worker_id):
@@ -517,18 +694,19 @@ def worker_loop(worker_id):
 
     # 生成目录
     #random_folder_name = f"task_w{worker_id}_{uuid.uuid4().hex[:8]}"
-    random_folder_name = f"iPhone {worker_id + 1}"
+    random_folder_name = f"iPhone{worker_id + 1}ForWebKitDevelopment"
     # appium_process进程
     appium_process = None
-    while True:
-        # 清理端口 防止端口没关闭
-        kill_port_process(wda_port)
-        time.sleep(1)
-        kill_port_process(webkit_port)
-        time.sleep(1)
-        kill_port_process(appium_port)
-        time.sleep(1)
 
+    # 清理端口 防止端口没关闭
+    kill_port_process(wda_port)
+    time.sleep(1)
+    kill_port_process(webkit_port)
+    time.sleep(1)
+    kill_port_process(appium_port)
+    time.sleep(1)
+
+    while True:
         #
         process = None
         real_udid = None
@@ -546,6 +724,7 @@ def worker_loop(worker_id):
                 print(f"[Worker-{worker_id}] [-] 解析任务数据失败或格式异常，跳过本次任务...")
                 time.sleep(3) 
                 continue 
+
             
             current_task_dir = os.path.join(BASE_TEMP_CONFIG_DIR, random_folder_name)
             os.makedirs(current_task_dir, exist_ok=True)
@@ -595,7 +774,7 @@ def worker_loop(worker_id):
                 # ==========================================================
 
                 #process = subprocess.Popen(cmd, env=env, cwd=PROJECT_ROOT_DIR)
-                time.sleep(35)
+                #time.sleep(35)
                 
                 # 查询 udid
                 # test6 这个版本 udid 号写死,避免重复启动虚拟机损耗资源
@@ -629,9 +808,9 @@ def worker_loop(worker_id):
             # test6 测试采用不关机的策略 只关 app
             print(f"[Worker-{worker_id}] [5] 测试结束，执行无痕清理工作...")
             print(f"[Worker-{worker_id}] 🔪 正在模拟器内强制终结 Minibrowser 进程...")
+            print(f"xcrun simctl terminate {real_udid} {MINIBROWSER_BUNDLE_ID} 2>/dev/null")
+            os.system(f"xcrun simctl terminate {real_udid} {MINIBROWSER_BUNDLE_ID} 2>/dev/null")
 
-            subprocess.run(["xcrun", "simctl", "terminate", real_udid,MINIBROWSER_BUNDLE_ID], check=True, timeout=10)
-            #os.system(f"xcrun simctl terminate {real_udid} {MINIBROWSER_BUNDLE_ID} 2>/dev/null")
             # if process:
             #     try:
             #         process.terminate()
@@ -678,4 +857,4 @@ if __name__ == "__main__":
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n🛑 [主控] 收到强制停止指令，正在退出全局监控...")
-        os.system("killall Simulator 2>/dev/null")
+        #os.system("killall Simulator 2>/dev/null")
